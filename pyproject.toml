@@ -3,7 +3,7 @@ name = "f-eigen"
 version = "0.0.1"
 dependencies = [
     "torch==2.4.1",
-    "transformers==4.53.3",
+    "transformers==4.55.4",
     "wandb>=0.21.4",
 ]
 requires-python = "==3.10.12"

@@ -97,7 +97,7 @@ for step in range(args.n_steps + 1):
             ranks = torch.argsort(y, descending=True)
             for r, token_id in enumerate(ranks[:10]):
                 prob = y[token_id].item()
-                token = tokenizer.decode(token_id)
+                token = tokenizer.decode(token_id, skip_special_tokens=False, clean_up_tokenization_spaces=False)
                 print(f'\trank = {r}, token_id = {token_id}, token = {repr(token)}, prob = {prob:.8f}')
 
             # print(f'nearest tokens:')
@@ -105,7 +105,7 @@ for step in range(args.n_steps + 1):
             # ranks = torch.argsort(dists)
             # for r, token_id in enumerate(ranks[:10]):
             #     dist = dists[token_id].item()
-            #     token = tokenizer.decode(token_id)
+            #     token = tokenizer.decode(token_id, skip_special_tokens=False, clean_up_tokenization_spaces=False)
             #     print(f'\trank = {r}, token_id = {token_id}, token = {token}, dist = {dist:.8f}')
 
     inputs_embeds = x.unsqueeze(0).unsqueeze(0) # (1, L=1, D)
