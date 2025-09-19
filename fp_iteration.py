@@ -1,38 +1,25 @@
-# uv run fp_batched.py
+# uv run fp_iteration.py
 
 import argparse
 from collections import defaultdict
-import os
 import json
+import os
 import random
 import numpy as np
 import torch
 import torch.nn.functional as F
 import transformers
-import wandb
 
 parser = argparse.ArgumentParser()
 parser.add_argument('-n', '--exp_name', type=str, required=True)
-parser.add_argument('--wandb', action='store_true')
 parser.add_argument('--model_name', type=str, default='allenai/OLMo-2-0425-1B-Instruct')
-parser.add_argument('--dtype', type=str, default='bf16', choices=['bf16', 'fp32'])
-parser.add_argument('--n_steps', type=int, default=100000)
-parser.add_argument('--optim', type=str, default='adamw', choices=['adamw', 'sgd'])
-parser.add_argument('--lr', type=float, default=1e-2)
-parser.add_argument('--scheduler_patience', type=int, default=10)
-parser.add_argument('--detach', action='store_true')
-parser.add_argument('--eval_len', type=int, default=10)
-parser.add_argument('--eval_every', type=int, default=10000)
+parser.add_argument('--n_steps', type=int, default=10000)
+parser.add_argument('--eval_len', type=int, default=100)
+parser.add_argument('--eval_every', type=int, default=1000)
 parser.add_argument('--print_every', type=int, default=100)
 parser.add_argument('--batch_size', type=int, default=1)
 parser.add_argument('--seed', type=int, default=19260817)
 args = parser.parse_args()
-if args.dtype == 'bf16':
-    dtype = torch.bfloat16
-elif args.dtype == 'fp32':
-    dtype = torch.float32
-else:
-    raise ValueError(f'Invalid dtype: {args.dtype}')
 
 def set_seed(seed=args.seed):
     random.seed(seed)
@@ -48,27 +35,20 @@ set_seed()
 
 device = torch.device('cuda')
 
-if args.wandb:
-    wandb.init(project='f-eigen', name=args.exp_name)
+print('='*100)
+print(args.exp_name)
 
 tokenizer = transformers.AutoTokenizer.from_pretrained(args.model_name)
-model = transformers.AutoModelForCausalLM.from_pretrained(args.model_name, torch_dtype=dtype).to(device)
+model = transformers.AutoModelForCausalLM.from_pretrained(args.model_name, torch_dtype=torch.float32).to(device)
 model.eval() # turn off dropout
 try:
     D = model.config.hidden_size
 except:
     D = model.config.text_config.hidden_size
-x = torch.nn.Parameter(torch.randn(args.batch_size, D, dtype=dtype, device=device) * model.config.initializer_range)
-if args.optim == 'adamw':
-    optimizer = torch.optim.AdamW([x], lr=args.lr, weight_decay=0.0)
-elif args.optim == 'sgd':
-    optimizer = torch.optim.SGD([x], lr=args.lr)
-else:
-    raise ValueError(f'Invalid optimizer: {args.optim}')
-scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=args.scheduler_patience, eps=1e-9)
-
+x = torch.nn.Parameter(torch.randn(args.batch_size, D, dtype=torch.float32, device=device) * model.config.initializer_range)
+loss = 1.0
 for step in range(args.n_steps + 1):
-    if step % args.eval_every == 0 or optimizer.param_groups[0]['lr'] < 3e-9:
+    if step % args.eval_every == 0 or loss < 1e-6:
         with torch.no_grad():
             print(f'evaluating step = {step} ...')
             fps = [{'index': b, 'x': x[b].tolist()} for b in range(args.batch_size)]
@@ -133,38 +113,23 @@ for step in range(args.n_steps + 1):
                 'step': step,
                 'fps': fps,
             }
-            with open(f'output/{args.exp_name}.json', 'w') as f:
+            with open(f'output_iteration/{args.exp_name}.json', 'w') as f:
                 json.dump(output, f, indent=4)
 
-    if optimizer.param_groups[0]['lr'] < 3e-9:
+    if loss < 1e-6:
         break
 
     inputs_embeds = x.unsqueeze(1) # (B, L=1, D)
-    if args.detach:
-        torch.set_grad_enabled(False)
-    outputs = model(
-        inputs_embeds=inputs_embeds,
-        position_ids=torch.zeros((args.batch_size, 1), dtype=torch.long, device=device),
-    )
-    y = outputs.logits[:, -1, :] # (B, V)
-    y = F.softmax(y, dim=-1) # (B, V)
-    y = y @ model.model.embed_tokens.weight.data # (B, D)
-    if args.detach:
-        y = y.detach()
-        torch.set_grad_enabled(True)
-    loss = torch.norm(y - x, dim=-1).mean()
-    loss.backward()
-    norm = torch.norm(x, dim=-1).mean().item()
-    grad_norm = torch.norm(x.grad, dim=-1).mean().item()
-    optimizer.step()
-    optimizer.zero_grad()
-    scheduler.step(loss)
-    if args.wandb:
-        wandb.log({
-            'loss': loss.item(),
-            'norm': norm,
-            'grad_norm': grad_norm,
-            'lr': optimizer.param_groups[0]['lr'],
-        }, step=step)
+    with torch.no_grad():
+        outputs = model(
+            inputs_embeds=inputs_embeds,
+            position_ids=torch.zeros((args.batch_size, 1), dtype=torch.long, device=device),
+        )
+        y = outputs.logits[:, -1, :] # (B, V)
+        y = F.softmax(y, dim=-1) # (B, V)
+        y = y @ model.model.embed_tokens.weight.data # (B, D)
+        loss = torch.norm(y - x, dim=-1).mean().item()
+        norm = torch.norm(x, dim=-1).mean().item()
+        x = y
     if step % args.print_every == 0:
-        print(f'step = {step}, loss = {loss.item():.8f}, norm = {norm:.8f}, lr = {optimizer.param_groups[0]["lr"]:.8f}')
+        print(f'step = {step}, loss = {loss:.8f}, norm = {norm:.8f}')
