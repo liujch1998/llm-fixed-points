@@ -29,6 +29,9 @@ MODELS = [
     'gemma3-1b-inst',
 ]
 
+# Collect num_fps data for all models
+model_data = {}
+
 for model in MODELS:
     print(f'{model}')
     fps = []
@@ -54,3 +57,27 @@ for model in MODELS:
     for i in true_ixs:
         print(f'FP #{i}: rollout_dist_first = {fps[i]["rollout_dist_by_l"]["1"]:.8f}, rollout_dist_max = {fps[i]["rollout_dist_max"]:.8f}, output_probs_argmax = {repr(fps[i]["output_probs"][0]["token"])} ({fps[i]["output_probs"][0]["prob"]:.4f})')
     print()
+
+    # Extract base model name and type
+    if model.endswith('-base'):
+        base_name = model[:-5]  # Remove '-base'
+        model_type = 'base'
+    elif model.endswith('-inst'):
+        base_name = model[:-5]  # Remove '-inst'
+        model_type = 'inst'
+    else:
+        continue  # Skip if neither inst nor base
+
+    if base_name not in model_data:
+        model_data[base_name] = {}
+    model_data[base_name][model_type] = len(true_ixs)
+
+# Generate markdown table
+print("\n## Number of FPs by Model\n")
+print("| Model | Base | Inst |")
+print("|-------|-----:|-----:|")
+
+for base_name in model_data.keys():
+    base_fps = model_data[base_name].get('base', 'N/A')
+    inst_fps = model_data[base_name].get('inst', 'N/A')
+    print(f"| {base_name} | {base_fps} | {inst_fps} |")

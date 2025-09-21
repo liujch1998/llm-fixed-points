@@ -133,7 +133,7 @@ for step in range(args.n_steps + 1):
                 'step': step,
                 'fps': fps,
             }
-            with open(f'output/{args.exp_name}.json', 'w') as f:
+            with open(f'output_batched/{args.exp_name}.json', 'w') as f:
                 json.dump(output, f, indent=4)
 
     if optimizer.param_groups[0]['lr'] < 3e-9:
@@ -152,6 +152,7 @@ for step in range(args.n_steps + 1):
     if args.detach:
         y = y.detach()
         torch.set_grad_enabled(True)
+    # loss = torch.nn.MSELoss()(100 * y, 100 * x)
     loss = torch.norm(y - x, dim=-1).mean()
     loss.backward()
     norm = torch.norm(x, dim=-1).mean().item()
